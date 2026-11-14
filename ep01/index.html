@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How We Built the 401(k) Simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&display=swap" rel="stylesheet">
+<style>
+/* Layout: one readable column (lab-notebook feel), wide tables scroll inside their own boxes on phones */
+:root {
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --ink: #1b1d26;
+  --muted: #5d6275;
+  --line: #d9dce6;
+  --accent: #2656d6;
+  --you: #e8691f;
+  --ok: #15803d;
+  --bad: #c0264f;
+  --hi: #eaf0ff;
+  --display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12141b; --surface: #1b1e28; --ink: #e9ebf2; --muted: #a2a7ba; --line: #2f3342;
+    --accent: #7b9cff; --you: #ff9a57; --ok: #4ade80; --bad: #ff7a9a; --hi: #1f2742; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12141b; --surface: #1b1e28; --ink: #e9ebf2; --muted: #a2a7ba; --line: #2f3342;
+  --accent: #7b9cff; --you: #ff9a57; --ok: #4ade80; --bad: #ff7a9a; --hi: #1f2742; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.6 var(--body); }
+main { max-width: 760px; margin: 0 auto; padding: 32px 18px 64px; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 7vw, 46px); font-weight: 800; letter-spacing: -0.01em; }
+h2 { font-size: 26px; font-weight: 700; display: flex; gap: 10px; align-items: baseline; }
+h2 .n { font: 600 14px var(--mono); color: var(--accent); }
+h3 { font-size: 18px; font-family: var(--body); font-weight: 700; }
+p { margin: 0; max-width: 65ch; }
+section { display: grid; gap: 14px; }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+header { display: grid; gap: 14px; }
+.kicker { font: 600 13px var(--mono); color: var(--you); text-transform: uppercase; letter-spacing: .06em; }
+.lede { font-size: 19px; color: var(--muted); }
+.note { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--you); border-radius: 10px; padding: 14px 16px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 6px; }
+.card .big { font: 800 30px var(--display); color: var(--accent); font-variant-numeric: tabular-nums; }
+.card .big.you { color: var(--bad); }
+.card p { font-size: 15px; color: var(--muted); }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 15px; font-variant-numeric: tabular-nums; }
+th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+thead th { font: 600 13px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+tbody th { font-weight: 500; }
+tr:last-child th, tr:last-child td { border-bottom: 0; }
+tr.hi { background: var(--hi); }
+.tbl.wrap table { min-width: 0; }
+.tbl.wrap th, .tbl.wrap td { overflow-wrap: anywhere; }
+.scrollhint { display: none; font-size: 13px; color: var(--muted); }
+@media (max-width: 600px) { .scrollhint { display: block; } .tbl.wrap th, .tbl.wrap td { padding: 8px 8px; font-size: 14px; } }
+.chip { display: inline-block; padding: 1px 10px; border-radius: 999px; font: 600 13px var(--mono); }
+.chip.ok { color: var(--ok); border: 1px solid var(--ok); }
+.chip.no { color: var(--bad); border: 1px solid var(--bad); }
+ul { margin: 0; padding-left: 22px; display: grid; gap: 6px; max-width: 65ch; }
+.caption { font-size: 14px; color: var(--muted); }
+.code { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.codebar { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 600 14px var(--mono); }
+button { font: 600 14px var(--body); color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+pre { margin: 0; padding: 14px; max-height: 360px; overflow: auto; font: 400 13px/1.5 var(--mono); }
+footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 14px; color: var(--muted); display: grid; gap: 8px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="kicker">Episode 1 · Methods</div>
+  <h1>How we built the 401(k) simulation</h1>
+  <p class="lede">The model behind "If the AI Bubble Pops, What Happens to YOUR 401(k)?" Every assumption, every result, every stress test, and the code to rerun it yourself.</p>
+  <p class="note"><strong>This is an illustration, not a forecast.</strong> The simulation can't tell you what the market will do. It shows how the same future plays out for people who make different choices. Education only, not financial advice. Updated Nov 13, 2026.</p>
+</header>
+
+<section aria-labelledby="short">
+  <h2 id="short"><span class="n">00</span>The short version</h2>
+  <div class="cards">
+    <div class="card"><div class="big">10,000</div><p>simulated 40-year lives for each of three AI futures</p></div>
+    <div class="card"><div class="big you">≈ −25%</div><p>how much less the typical panic-seller ended up with, in all three futures</p></div>
+    <div class="card"><div class="big">≈ 1 in 20</div><p>runs where panic-selling actually came out ahead, under our main rule</p></div>
+  </div>
+  <p>The dollar amounts depend heavily on our assumptions. The comparison between investors held up across almost every alternative assumption we tried. Details below.</p>
+</section>
+
+<section aria-labelledby="who">
+  <h2 id="who"><span class="n">01</span>The person we simulated</h2>
+  <ul>
+    <li>Starts at age 25 with <strong>$10,000</strong> in an S&amp;P 500 index fund.</li>
+    <li>Adds <strong>$300 at the end of every month</strong> for 40 years. That's a fixed dollar amount; it does not rise with inflation or salary. Total put in: $154,000.</li>
+    <li>Results are shown at age 65 in <strong>today's money</strong>: final balance ÷ 1.03<sup>40</sup> (≈ 3.26), i.e. 3% a year inflation.</li>
+    <li>"Typical result" in the video means the <strong>median</strong> across all runs, not the average.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="market">
+  <h2 id="market"><span class="n">02</span>The market</h2>
+  <p>We split the S&amp;P 500 into two parts and let a cap-weighted fund hold them in proportion to their value. When one part grows faster, its share of your account grows automatically, just like a real index fund.</p>
+  <div class="tbl wrap"><table>
+    <thead><tr><th>Part</th><th>Starting share</th><th>What it stands for</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">AI giants</th><td>37%</td><td>The 10 largest holdings (SPY, Nov 2026)</td></tr>
+      <tr><th scope="row">Everything else</th><td>63%</td><td>The other ~490 companies</td></tr>
+    </tbody>
+  </table></div>
+  <div class="tbl wrap"><table>
+    <thead><tr><th>Setting</th><th>Value</th><th>Where it comes from</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Long-run return</th><td>9.5% / yr (before inflation, dividends included)</td><td>Close to the S&amp;P 500's long-run total return</td></tr>
+      <tr><th scope="row">Volatility, everything else</th><td>15% / yr</td><td>Close to the S&amp;P 500's long-run volatility</td></tr>
+      <tr><th scope="row">Volatility, AI giants</th><td>25% / yr</td><td><strong>Our assumption.</strong> A concentrated basket of big tech stocks swings more than the whole index. Not a historical measurement.</td></tr>
+      <tr><th scope="row">Correlation between the two</th><td>0.75</td><td>Our assumption: they mostly rise and fall together</td></tr>
+      <tr><th scope="row">Monthly returns</th><td>Random, normal (log) distribution, 480 months</td><td>Standard Monte Carlo setup. Understates extreme crashes.</td></tr>
+      <tr><th scope="row">Cash yield (panic-seller)</th><td>3% / yr</td><td>Roughly a long-run money-market average</td></tr>
+      <tr><th scope="row">Fees and taxes</th><td>Not included</td><td>Same for every investor, so the comparison is unaffected</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section aria-labelledby="futures">
+  <h2 id="futures"><span class="n">03</span>The three futures</h2>
+  <p>We don't say which future is more likely. Each one is run 10,000 times with fresh random ups and downs.</p>
+  <div class="tbl wrap"><table>
+    <thead><tr><th>Future</th><th>What happens to the AI giants</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Boom</th><td>Beat the rest of the market by about 6% a year for 5 years, then normal.</td></tr>
+      <tr><th scope="row">Cool-off</th><td>Trail the rest of the market by about 3% a year for 10 years.</td></tr>
+      <tr><th scope="row">Pop</th><td>Starting in a random month within the first 3 years, they lose 70% over 24 months while everything else loses 25%. Afterwards they trail by 2% a year for 10 years. Loosely based on 2000–02, when the Nasdaq fell about 78% and the S&amp;P 500 about 49%.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section aria-labelledby="investors">
+  <h2 id="investors"><span class="n">04</span>The three investors</h2>
+  <div class="tbl wrap"><table>
+    <thead><tr><th>Investor</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Held on</th><td>Owns the index fund and never sells.</td></tr>
+      <tr><th scope="row">Panic-seller</th><td>When the account falls 30% below its own previous high, sells everything and moves to cash (3% / yr). Keeps adding $300 a month into cash. Buys back in, all at once, only when the fund gets back to the high it had when they sold. Repeats every time it happens.</td></tr>
+      <tr><th scope="row">Capped 3%</th><td>Puts only 3¢ of every dollar in the AI giants and 97¢ in everything else, rebalanced monthly. This caps concentration; it is <strong>not</strong> an equal-weight fund (an equal-weight S&amp;P 500 fund is the closest real-world idea).</td></tr>
+    </tbody>
+  </table></div>
+  <p class="caption">Every investor in a future sees the exact same random market path, so differences come from their choices, not luck.</p>
+</section>
+
+<section aria-labelledby="results">
+  <h2 id="results"><span class="n">05</span>Results</h2>
+  <p class="scrollhint">Swipe tables sideways to see all columns →</p>
+  <div class="tbl"><table>
+    <thead><tr><th>10,000 runs per future, today's money</th><th>Boom</th><th>Cool-off</th><th>Pop</th></tr></thead>
+    <tbody><tr class="hi"><th scope="row">Held on, median</th><td>$670K</td><td>$602K</td><td>$480K</td></tr><tr class=""><th scope="row">Held on, 10th–90th percentile</th><td>$214K–$2,534K</td><td>$204K–$2,100K</td><td>$180K–$1,434K</td></tr><tr class=""><th scope="row">Panic-seller, median</th><td>$449K</td><td>$442K</td><td>$383K</td></tr><tr class="hi"><th scope="row">Panic-seller vs. held on</th><td>−30%</td><td>−25%</td><td>−21%</td></tr><tr class=""><th scope="row">Runs where panic-selling won</th><td>6.3%</td><td>5.6%</td><td>5.0%</td></tr><tr class=""><th scope="row">Panic-sellers who sold at least once</th><td>88%</td><td>79%</td><td>68%</td></tr><tr class=""><th scope="row">Capped 3% portfolio vs. held on</th><td>−4%</td><td>+6%</td><td>+8%</td></tr><tr class=""><th scope="row">Scary moment: account ÷ money put in (first 6 yrs)</th><td>0.93</td><td>0.90</td><td>0.66</td></tr></tbody>
+  </table></div>
+  <p class="caption">"vs. held on" is the median of the ratio between two investors on the same market path. The video rounds these to $670K / $600K / $480K and "roughly a quarter less."</p>
+  <p>The wide 10th–90th percentile range is the honest part: in any single life, luck matters a lot. The comparison between choices is much more stable than the dollar amounts.</p>
+</section>
+
+<section aria-labelledby="stress">
+  <h2 id="stress"><span class="n">06</span>Stress tests: what if we're wrong?</h2>
+  <h3>Different returns and volatility (4,000 runs each)</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Return</th><th>AI vol</th><th>Held on (boom / cool / pop)</th><th>Panic vs. held on</th><th>Panic won</th><th>"Best-future panic &lt; worst-future hold"</th></tr></thead>
+    <tbody><tr class=""><td>7.5%</td><td>20%</td><td>$366K / $337K / $274K</td><td>−22% / −19% / −14%</td><td>10% / 8% / 8%</td><td><span class="chip no">fails</span></td></tr><tr class=""><td>7.5%</td><td>25%</td><td>$376K / $345K / $278K</td><td>−29% / −25% / −22%</td><td>12% / 10% / 9%</td><td><span class="chip ok">holds</span></td></tr><tr class=""><td>7.5%</td><td>30%</td><td>$383K / $355K / $282K</td><td>−37% / −31% / −25%</td><td>12% / 11% / 10%</td><td><span class="chip ok">holds</span></td></tr><tr class=""><td>9.5%</td><td>20%</td><td>$656K / $596K / $466K</td><td>−21% / −17% / −9%</td><td>6% / 5% / 4%</td><td><span class="chip no">fails</span></td></tr><tr class="hi"><td>9.5%</td><td>25%</td><td>$674K / $616K / $476K</td><td>−29% / −26% / −21%</td><td>6% / 5% / 5%</td><td><span class="chip ok">holds</span></td></tr><tr class=""><td>9.5%</td><td>30%</td><td>$689K / $627K / $480K</td><td>−41% / −31% / −25%</td><td>7% / 6% / 6%</td><td><span class="chip ok">holds</span></td></tr><tr class=""><td>11.0%</td><td>20%</td><td>$1,025K / $930K / $706K</td><td>−19% / −2% / 0%</td><td>4% / 3% / 3%</td><td><span class="chip no">fails</span></td></tr><tr class=""><td>11.0%</td><td>25%</td><td>$1,057K / $959K / $719K</td><td>−29% / −25% / −19%</td><td>5% / 4% / 3%</td><td><span class="chip ok">holds</span></td></tr><tr class=""><td>11.0%</td><td>30%</td><td>$1,086K / $977K / $726K</td><td>−42% / −31% / −25%</td><td>4% / 4% / 4%</td><td><span class="chip ok">holds</span></td></tr></tbody>
+  </table></div>
+  <p class="caption">Highlighted row = the main setup used in the video.</p>
+
+  <h3>Cash pays only 1% instead of 3%</h3>
+  <div class="tbl"><table><thead><tr><th></th><th>Boom</th><th>Cool-off</th><th>Pop</th></tr></thead><tbody><tr><th scope='row'>Held on, median</th><td>$674K</td><td>$616K</td><td>$476K</td></tr><tr><th scope='row'>Panic-seller vs. held on</th><td>−34%</td><td>−31%</td><td>−28%</td></tr><tr><th scope='row'>Runs where panic-selling won</th><td>4%</td><td>3%</td><td>3%</td></tr><tr><th scope='row'>Capped 3% vs. held on</th><td>−4%</td><td>+5%</td><td>+8%</td></tr></tbody></table></div>
+
+  <h3>AI giants and the rest move together more (correlation 0.9)</h3>
+  <div class="tbl"><table><thead><tr><th></th><th>Boom</th><th>Cool-off</th><th>Pop</th></tr></thead><tbody><tr><th scope='row'>Held on, median</th><td>$645K</td><td>$591K</td><td>$461K</td></tr><tr><th scope='row'>Panic-seller vs. held on</th><td>−33%</td><td>−28%</td><td>−23%</td></tr><tr><th scope='row'>Runs where panic-selling won</th><td>7%</td><td>6%</td><td>5%</td></tr><tr><th scope='row'>Capped 3% vs. held on</th><td>−5%</td><td>+4%</td><td>+7%</td></tr></tbody></table></div>
+
+  <h3>Panic-sellers who buy back sooner</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>When they buy back</th><th>Panic vs. held on (boom / cool / pop)</th><th>Panic won</th></tr></thead>
+    <tbody><tr class="hi"><th scope="row">Back at the old peak (used in the video)</th><td>−29% / −26% / −21%</td><td>6% / 5% / 5%</td></tr><tr class=""><th scope="row">20% above the low</th><td>−12% / −9% / −3%</td><td>19% / 15% / 14%</td></tr><tr class=""><th scope="row">12 months after selling</th><td>−6% / −3% / 0%</td><td>28% / 25% / 23%</td></tr><tr class=""><th scope="row">6 months after selling</th><td>−2% / −0% / 0%</td><td>33% / 28% / 28%</td></tr></tbody>
+  </table></div>
+  <p>The crash depth matters less: with the AI giants losing 50% or 85% instead of 70%, the typical panic-seller still ends up about 20–23% behind.</p>
+</section>
+
+<section aria-labelledby="held">
+  <h2 id="held"><span class="n">07</span>What held up, and what didn't</h2>
+  <ul>
+    <li><strong>Held up:</strong> the typical panic-seller fell behind in all three futures in 8 of the 9 return/volatility settings, and with 1% cash, 0.9 correlation, and deeper or shallower crashes. Panic beat holding in a minority of runs (3%–12%).</li>
+    <li><strong>Depends on the rule:</strong> buying back sooner shrinks the damage a lot. With a 6-month rule the gap is close to zero. The cost of panic comes mostly from time spent out of the market during the recovery. The video says this out loud.</li>
+    <li><strong>Only in our main setup:</strong> "the typical panic-seller in the best future ended up with less than the typical holder in the worst one" holds when AI-giant volatility is 25% or 30% and fails at 20%. That's why the video says "in our main run."</li>
+    <li><strong>Not robust:</strong> the dollar amounts. They range from about $270K to over $1M depending on the return assumption.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="limits">
+  <h2 id="limits"><span class="n">08</span>Limitations</h2>
+  <ul>
+    <li>The sizes of the boom, cool-off and pop are illustrative choices, not predictions.</li>
+    <li>Normally distributed returns understate how often extreme crashes happen.</li>
+    <li>No fees, taxes, employer match, or salary growth.</li>
+    <li>The panic rule is one simple behavior. Real people panic in many different ways.</li>
+    <li>Two parts of the market is a simplification of 500 companies.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="facts">
+  <h2 id="facts"><span class="n">09</span>Other numbers in the video</h2>
+  <div class="tbl wrap"><table>
+    <thead><tr><th>Claim</th><th>Number</th><th>Source</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Nvidia on Nov 12, 2026</th><td>Prior close $173.73, low $148.80 (−14.35%), close $166.19 (−4.34%)</td><td><a href="https://stockanalysis.com/stocks/nvda/history/">StockAnalysis price history</a></td></tr>
+      <tr><th scope="row">Nvidia's share of an S&amp;P 500 fund</th><td>6.40% (SPY, Nov 11); 6.14% (Nov 12)</td><td><a href="https://www.gurufocus.com/news/9197516/etfs-are-buying-nvidia-nvda-on-wednesday">GuruFocus</a>, <a href="https://stockanalysis.com/etf/spy/holdings/">SPY holdings</a></td></tr>
+      <tr><th scope="row">"About $90, under $30" on a $10,000 fund</th><td>$10,000 × 6.40% × 14.35% ≈ $92; × 4.34% ≈ $28, assuming every other stock stayed flat</td><td>Our calculation</td></tr>
+      <tr><th scope="row">Top 10 holdings ≈ 37¢ of every dollar</th><td>37.07% (SPY, Nov 2026)</td><td><a href="https://stockanalysis.com/etf/spy/holdings/">SPY holdings</a></td></tr>
+      <tr><th scope="row">2000: "a little over a quarter"</th><td>Top 10 briefly above 25% in June 2000</td><td><a href="https://www.morningstar.com/stocks/sp-500-grows-ever-more-concentrated">Morningstar</a></td></tr>
+      <tr><th scope="row">−49% from peak to bottom</th><td>1,527.46 (Mar 24, 2000) → 776.76 (Oct 9, 2002), price only</td><td><a href="https://www.morningstar.com/news/marketwatch/20251011182/why-your-sp-500-index-fund-might-be-more-risky-than-the-internet-bubble">MarketWatch via Morningstar</a></td></tr>
+      <tr><th scope="row">About seven years to recover</th><td>Price index regained its 2000 high in May 2007; dividends not included</td><td>S&amp;P 500 index history</td></tr>
+      <tr><th scope="row">A 30% drop needs a 43% gain</th><td>1 ÷ 0.70 − 1 = 42.9%</td><td>Arithmetic</td></tr>
+      <tr><th scope="row">1.2 percentage points a year, ≈ 12% of returns</th><td>Investor return 8.7% vs. fund return 9.9%, 10 years to Dec 31, 2025</td><td><a href="https://www.morningstar.com/content/cs-assets/v3/assets/blt9415ea4cc4157833/blt852a4301adc2f5db/6a7373d51f7b5ae2da78e1e8/US_Mind_the_Gap_2026.pdf">Morningstar, Mind the Gap 2026</a></td></tr>
+      <tr><th scope="row">"Roughly 30% less" over 40 years</th><td>Hypothetical: $10K + $300/mo for 40 yrs at 9.9% vs. 8.7% → about 30% less; at 6.0% vs. 4.8% → about 28% less</td><td>Our calculation. Morningstar measured the past; this is not a forecast.</td></tr>
+      <tr><th scope="row">No tax on switching funds inside a 401(k)</th><td>Contributions and earnings are generally taxed only when withdrawn</td><td><a href="https://www.irs.gov/taxtopics/tc424">IRS Topic 424</a>. Check your plan's rules and fees.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section aria-labelledby="code">
+  <h2 id="code"><span class="n">10</span>Run it yourself</h2>
+  <p>You need Python 3 and numpy (<code>pip install numpy</code>). Save both files in one folder and run <code>python3 run_all.py</code>. It takes about 10 seconds and prints the same tables you see above. Random seeds are fixed (boom = 1, cool-off = 2, pop = 3). Our results were made with numpy 2.5.3.</p>
+  <div class="code">
+    <div class="codebar"><span>ai401k_model.py</span><button type="button" data-copy="c1">Copy code</button></div>
+    <pre id="c1">&quot;&quot;&quot;AI bubble x your 401(k): illustrative Monte Carlo. NOT a forecast.
+
+Market = two sleeves of a cap-weighted S&amp;P 500 fund:
+  AI   : the top-10 / AI-heavy giants, 37% of the index at the start (SPY holdings, 2026-11-12 close)
+  REST : everything else, 63%
+A cap-weighted fund simply owns both in proportion to their current value.
+
+Three possible AI futures (we do not assign probabilities; each is run 10,000 times):
+  boom  : AI sleeve beats the rest by ~6%/yr for 5 years, then normal
+  fade  : AI sleeve trails the rest by ~3%/yr for 10 years
+  pop   : starting in a random month in the first 3 years, AI sleeve loses 70% over 24 months while
+          the rest loses 25% (contagion); afterwards AI trails by 2%/yr for 10 years (Cisco-style)
+
+Investors (all start at age 25 with $10,000 and add $300/month for 40 years):
+  holder  : cap-weighted S&amp;P 500 fund, never sells
+  panic   : same fund; if the account falls 30% below its peak, sells everything to cash (3%/yr),
+            keeps saving into cash, buys back only when the fund regains its old peak
+  spread  : a fund with only 3% in the AI giants (roughly equal-weight-like), rebalanced monthly
+&quot;&quot;&quot;
+import numpy as np
+
+MONTHS = 40 * 12
+START, MONTHLY = 10_000.0, 300.0
+W_AI0 = 0.37
+MU_REST = 0.095            # long-run nominal annual return for the rest of the market (approx.)
+SIG_REST, SIG_AI, RHO = 0.15, 0.25, 0.75
+CASH = 0.03
+
+
+def market_paths(n, fate, rng):
+    &quot;&quot;&quot;Monthly log returns for (AI, REST): arrays shape (n, MONTHS).&quot;&quot;&quot;
+    dt = 1 / 12
+    z1 = rng.standard_normal((n, MONTHS)); z2 = rng.standard_normal((n, MONTHS))
+    e_rest = z1
+    e_ai = RHO * z1 + np.sqrt(1 - RHO ** 2) * z2
+    mu_rest_log = np.log1p(MU_REST) * dt
+    rest = mu_rest_log + SIG_REST * np.sqrt(dt) * e_rest
+    ai = mu_rest_log + SIG_AI * np.sqrt(dt) * e_ai
+    m = np.arange(MONTHS)[None, :]
+    if fate == &quot;boom&quot;:
+        ai = ai + np.where(m &lt; 60, np.log1p(0.06) * dt, 0)
+    elif fate == &quot;fade&quot;:
+        ai = ai + np.where(m &lt; 120, np.log(1 - 0.03) * dt, 0)
+    elif fate == &quot;pop&quot;:
+        start = rng.integers(0, 36, n)[:, None]
+        crash = (m &gt;= start) &amp; (m &lt; start + 24)
+        after = (m &gt;= start + 24) &amp; (m &lt; start + 144)
+        ai = np.where(crash, np.log(0.30) / 24 + SIG_AI * np.sqrt(dt) * e_ai * 0.5, ai)
+        rest = np.where(crash, np.log(0.75) / 24 + SIG_REST * np.sqrt(dt) * e_rest * 0.5, rest)
+        ai = ai + np.where(after, np.log(1 - 0.02) * dt, 0)
+    return ai, rest
+
+
+def run(n=10_000, fate=&quot;pop&quot;, seed=0):
+    rng = np.random.default_rng(seed)
+    ai, rest = market_paths(n, fate, rng)
+    gai, grest = np.exp(ai), np.exp(rest)
+    out = {}
+    # index level of the cap-weighted fund (used by the panic seller&#x27;s re-entry rule)
+    a_val = np.full(n, W_AI0); r_val = np.full(n, 1 - W_AI0)
+    idx_path = np.empty((n, MONTHS))
+    for t in range(MONTHS):
+        a_val = a_val * gai[:, t]; r_val = r_val * grest[:, t]
+        idx_path[:, t] = a_val + r_val
+    idx_ret = idx_path / np.concatenate([np.ones((n, 1)), idx_path[:, :-1]], axis=1)
+
+    # holder
+    v = np.full(n, START); low = np.full(n, START); contrib = START
+    vmin_ratio = np.ones(n)
+    for t in range(MONTHS):
+        v = v * idx_ret[:, t] + MONTHLY
+    out[&quot;holder&quot;] = v
+
+    # panic seller
+    v = np.full(n, START); peak_acct = v.copy(); in_mkt = np.ones(n, bool)
+    sold_idx_peak = np.zeros(n); idx_peak = np.ones(n); sold_ever = np.zeros(n, bool)
+    months_out = np.zeros(n)
+    for t in range(MONTHS):
+        idx_now = idx_path[:, t]
+        v = np.where(in_mkt, v * idx_ret[:, t], v * (1 + CASH) ** (1 / 12)) + MONTHLY
+        idx_peak = np.maximum(idx_peak, idx_now)
+        peak_acct = np.where(in_mkt, np.maximum(peak_acct, v), peak_acct)
+        sell = in_mkt &amp; (v &lt; 0.70 * peak_acct)
+        sold_idx_peak = np.where(sell, idx_peak, sold_idx_peak)
+        in_mkt = in_mkt &amp; ~sell
+        sold_ever |= sell
+        buy = (~in_mkt) &amp; (idx_now &gt;= sold_idx_peak) &amp; ~sell
+        in_mkt = in_mkt | buy
+        peak_acct = np.where(buy, v, peak_acct)
+        months_out += ~in_mkt
+    out[&quot;panic&quot;] = v
+    out[&quot;panic_sold_share&quot;] = sold_ever.mean()
+    out[&quot;panic_months_out_median&quot;] = np.median(months_out[sold_ever]) if sold_ever.any() else 0
+
+    # spread (3% in AI giants, rebalanced monthly)
+    w = 0.03
+    sp_ret = w * gai + (1 - w) * grest
+    v = np.full(n, START)
+    for t in range(MONTHS):
+        v = v * sp_ret[:, t] + MONTHLY
+    out[&quot;spread&quot;] = v
+
+    # scary moment for the holder in the first 6 years: worst account value
+    v = np.full(n, START); worst = np.full(n, np.inf)
+    for t in range(72):
+        v = v * idx_ret[:, t] + MONTHLY
+        contributed = START + MONTHLY * (t + 1)
+        worst = np.minimum(worst, v / contributed)
+    out[&quot;worst_ratio_6y&quot;] = worst
+    return out
+
+
+if __name__ == &quot;__main__&quot;:
+    contributed = START + MONTHLY * MONTHS
+    print(f&quot;total contributed: ${contributed:,.0f}&quot;)
+    for fate in (&quot;boom&quot;, &quot;fade&quot;, &quot;pop&quot;):
+        o = run(fate=fate, seed={&quot;boom&quot;: 1, &quot;fade&quot;: 2, &quot;pop&quot;: 3}[fate])
+        print(f&quot;\n== {fate} ==&quot;)
+        for k in (&quot;holder&quot;, &quot;panic&quot;, &quot;spread&quot;):
+            x = o[k]
+            print(f&quot;  {k:7s} median ${np.median(x):&gt;12,.0f}   10th pct ${np.percentile(x,10):&gt;12,.0f}   90th ${np.percentile(x,90):&gt;12,.0f}&quot;)
+        print(f&quot;  panic: share who ever sold {o[&#x27;panic_sold_share&#x27;]:.0%}, median months out {o[&#x27;panic_months_out_median&#x27;]:.0f}&quot;)
+        print(f&quot;  holder worst moment (first 6y), account/contributed: median {np.median(o[&#x27;worst_ratio_6y&#x27;]):.2f}&quot;)
+        print(f&quot;  panic vs holder (median of paired ratio): {np.median(o[&#x27;panic&#x27;]/o[&#x27;holder&#x27;]):.2f}&quot;)
+        print(f&quot;  spread vs holder (median of paired ratio): {np.median(o[&#x27;spread&#x27;]/o[&#x27;holder&#x27;]):.2f}&quot;)
+</pre>
+  </div>
+  <div class="code">
+    <div class="codebar"><span>run_all.py</span><button type="button" data-copy="c2">Copy code</button></div>
+    <pre id="c2">&quot;&quot;&quot;Reproduce every number used in Episode 1 (and its stress tests).
+Usage: python3 run_all.py      (numpy only; ~5-10 min)  -&gt; results.json + results.md&quot;&quot;&quot;
+import json, numpy as np, ai401k_model as M
+
+INFL = 1.03 ** 40          # 3.262: nominal -&gt; today&#x27;s money
+SEEDS = {&quot;boom&quot;: 1, &quot;fade&quot;: 2, &quot;pop&quot;: 3}
+BASE = dict(MU_REST=M.MU_REST, SIG_REST=M.SIG_REST, SIG_AI=M.SIG_AI, RHO=M.RHO, CASH=M.CASH, W_AI0=M.W_AI0)
+
+def setp(**kw):
+    for k, v in {**BASE, **kw}.items(): setattr(M, k, v)
+
+def summarize(o):
+    h, p, s = o[&quot;holder&quot;] / INFL, o[&quot;panic&quot;] / INFL, o[&quot;spread&quot;] / INFL
+    return dict(holder_median=float(np.median(h)), panic_median=float(np.median(p)), spread_median=float(np.median(s)),
+                holder_p10=float(np.percentile(h, 10)), holder_p90=float(np.percentile(h, 90)),
+                panic_vs_holder_paired_median=float(np.median(p / h) - 1), panic_beat_holder_share=float(np.mean(p &gt; h)),
+                panic_sold_at_least_once=float(o[&quot;panic_sold_share&quot;]), spread_vs_holder_paired_median=float(np.median(s / h) - 1),
+                holder_worst_ratio_first6y_median=float(np.median(o[&quot;worst_ratio_6y&quot;])))
+
+def run_set(n, **kw):
+    setp(**kw)
+    return {f: summarize(M.run(n=n, fate=f, seed=sd)) for f, sd in SEEDS.items()}
+
+def panic_reentry(fate, seed, rule, n=4000):
+    rng = np.random.default_rng(seed)
+    ai, rest = M.market_paths(n, fate, rng); gai, grest = np.exp(ai), np.exp(rest)
+    a = np.full(n, M.W_AI0); r = np.full(n, 1 - M.W_AI0); idx = np.empty((n, M.MONTHS))
+    for t in range(M.MONTHS):
+        a *= gai[:, t]; r *= grest[:, t]; idx[:, t] = a + r
+    ret = idx / np.concatenate([np.ones((n, 1)), idx[:, :-1]], axis=1)
+    h = np.full(n, M.START)
+    for t in range(M.MONTHS): h = h * ret[:, t] + M.MONTHLY
+    v = np.full(n, M.START); peak = v.copy(); inm = np.ones(n, bool); ipk = np.ones(n); sold_pk = np.zeros(n)
+    out_m = np.zeros(n); low = np.full(n, np.inf)
+    for t in range(M.MONTHS):
+        now = idx[:, t]
+        v = np.where(inm, v * ret[:, t], v * (1 + M.CASH) ** (1 / 12)) + M.MONTHLY
+        ipk = np.maximum(ipk, now); peak = np.where(inm, np.maximum(peak, v), peak)
+        sell = inm &amp; (v &lt; 0.70 * peak)
+        sold_pk = np.where(sell, ipk, sold_pk); low = np.where(sell, now, low)
+        inm = inm &amp; ~sell
+        out_m = np.where(inm, 0, out_m + 1); low = np.where(~inm, np.minimum(low, now), low)
+        buy = {&quot;old_peak&quot;: now &gt;= sold_pk, &quot;after_12_months&quot;: out_m &gt;= 12, &quot;after_6_months&quot;: out_m &gt;= 6,
+               &quot;plus20_off_low&quot;: now &gt;= 1.2 * low}[rule] &amp; ~inm &amp; ~sell
+        inm |= buy; peak = np.where(buy, v, peak)
+    return dict(panic_vs_holder_paired_median=float(np.median(v / h) - 1), panic_beat_holder_share=float(np.mean(v &gt; h)))
+
+R = {&quot;parameters&quot;: dict(BASE, START=M.START, MONTHLY=M.MONTHLY, MONTHS=M.MONTHS, inflation_annual=0.03, seeds=SEEDS,
+                        n_main=10000, n_tests=4000, numpy_version=np.__version__)}
+print(&quot;main run (10,000 per future)...&quot;); R[&quot;main&quot;] = run_set(10000)
+print(&quot;stress grid...&quot;); R[&quot;stress_grid&quot;] = {}
+for mu in (0.075, 0.095, 0.11):
+    for sig in (0.20, 0.25, 0.30):
+        R[&quot;stress_grid&quot;][f&quot;return_{mu}_aivol_{sig}&quot;] = run_set(4000, MU_REST=mu, SIG_AI=sig)
+print(&quot;extra tests...&quot;); R[&quot;cash_1pct&quot;] = run_set(4000, CASH=0.01); R[&quot;corr_0.9&quot;] = run_set(4000, RHO=0.90)
+print(&quot;re-entry rules...&quot;); setp(); R[&quot;reentry&quot;] = {rule: {f: panic_reentry(f, sd, rule) for f, sd in SEEDS.items()}
+                                     for rule in (&quot;old_peak&quot;, &quot;plus20_off_low&quot;, &quot;after_12_months&quot;, &quot;after_6_months&quot;)}
+json.dump(R, open(&quot;results.json&quot;, &quot;w&quot;), indent=1)
+
+def k(x): return f&quot;${x/1e3:,.0f}K&quot;
+def pc(x): return f&quot;{x:+.0%}&quot;
+L = [&quot;# Episode 1 simulation results (generated by run_all.py)&quot;, &quot;&quot;,
+     &quot;Today&#x27;s money = nominal / 1.03^40. Medians across runs. Paired = same random market path for both investors.&quot;, &quot;&quot;,
+     &quot;## Main run (10,000 per future)&quot;, &quot;&quot;,
+     &quot;| | Boom | Cool-off | Pop |&quot;, &quot;|---|---|---|---|&quot;]
+m = R[&quot;main&quot;]; F = (&quot;boom&quot;, &quot;fade&quot;, &quot;pop&quot;)
+for lab, key, fmt in ((&quot;Holder median&quot;, &quot;holder_median&quot;, k), (&quot;Holder 10th pct&quot;, &quot;holder_p10&quot;, k), (&quot;Holder 90th pct&quot;, &quot;holder_p90&quot;, k),
+                      (&quot;Panic-seller median&quot;, &quot;panic_median&quot;, k), (&quot;Panic vs holder (paired)&quot;, &quot;panic_vs_holder_paired_median&quot;, pc),
+                      (&quot;Panic beat holder&quot;, &quot;panic_beat_holder_share&quot;, lambda x: f&quot;{x:.1%}&quot;),
+                      (&quot;Panic sold at least once&quot;, &quot;panic_sold_at_least_once&quot;, lambda x: f&quot;{x:.0%}&quot;),
+                      (&quot;Capped 3% portfolio vs holder (paired)&quot;, &quot;spread_vs_holder_paired_median&quot;, pc),
+                      (&quot;Holder worst point in first 6 yrs / money put in&quot;, &quot;holder_worst_ratio_first6y_median&quot;, lambda x: f&quot;{x:.2f}&quot;)):
+    L.append(f&quot;| {lab} | &quot; + &quot; | &quot;.join(fmt(m[f][key]) for f in F) + &quot; |&quot;)
+L += [&quot;&quot;, &quot;## Stress grid (4,000 per future)&quot;, &quot;&quot;,
+      &quot;| Return (non-giants) | AI-giant vol | Holder boom/cool/pop | Panic vs holder | Panic beat holder | Best-future panic &lt; worst-future holder |&quot;,
+      &quot;|---|---|---|---|---|---|&quot;]
+for key, r in R[&quot;stress_grid&quot;].items():
+    mu, sig = key.split(&quot;_&quot;)[1], key.split(&quot;_&quot;)[3]
+    L.append(f&quot;| {float(mu):.1%} | {float(sig):.0%} | &quot; + &quot;/&quot;.join(k(r[f][&#x27;holder_median&#x27;]) for f in F) + &quot; | &quot;
+             + &quot;/&quot;.join(pc(r[f][&#x27;panic_vs_holder_paired_median&#x27;]) for f in F) + &quot; | &quot;
+             + &quot;/&quot;.join(f&quot;{r[f][&#x27;panic_beat_holder_share&#x27;]:.0%}&quot; for f in F) + &quot; | &quot;
+             + (&quot;yes&quot; if r[&quot;boom&quot;][&quot;panic_median&quot;] &lt; r[&quot;pop&quot;][&quot;holder_median&quot;] else &quot;no&quot;) + &quot; |&quot;)
+for name, key in ((&quot;Cash yield 1% (instead of 3%)&quot;, &quot;cash_1pct&quot;), (&quot;Correlation 0.9 (instead of 0.75)&quot;, &quot;corr_0.9&quot;)):
+    r = R[key]
+    L += [&quot;&quot;, f&quot;## {name}&quot;, &quot;&quot;, &quot;| | Boom | Cool-off | Pop |&quot;, &quot;|---|---|---|---|&quot;]
+    for lab, kk, fmt in ((&quot;Holder median&quot;, &quot;holder_median&quot;, k), (&quot;Panic vs holder&quot;, &quot;panic_vs_holder_paired_median&quot;, pc),
+                         (&quot;Panic beat holder&quot;, &quot;panic_beat_holder_share&quot;, lambda x: f&quot;{x:.0%}&quot;),
+                         (&quot;Capped 3% vs holder&quot;, &quot;spread_vs_holder_paired_median&quot;, pc)):
+        L.append(f&quot;| {lab} | &quot; + &quot; | &quot;.join(fmt(r[f][kk]) for f in F) + &quot; |&quot;)
+    L.append(f&quot;\nBest-future panic &lt; worst-future holder: {&#x27;yes&#x27; if r[&#x27;boom&#x27;][&#x27;panic_median&#x27;] &lt; r[&#x27;pop&#x27;][&#x27;holder_median&#x27;] else &#x27;no&#x27;}&quot;)
+L += [&quot;&quot;, &quot;## Panic-seller buy-back rules (4,000 per future)&quot;, &quot;&quot;, &quot;| Rule | Panic vs holder (boom/cool/pop) | Panic beat holder |&quot;, &quot;|---|---|---|&quot;]
+for rule, r in R[&quot;reentry&quot;].items():
+    L.append(f&quot;| {rule} | &quot; + &quot;/&quot;.join(pc(r[f][&#x27;panic_vs_holder_paired_median&#x27;]) for f in F) + &quot; | &quot;
+             + &quot;/&quot;.join(f&quot;{r[f][&#x27;panic_beat_holder_share&#x27;]:.0%}&quot; for f in F) + &quot; |&quot;)
+open(&quot;results.md&quot;, &quot;w&quot;).write(&quot;\n&quot;.join(L) + &quot;\n&quot;)
+print(&quot;done&quot;)
+</pre>
+  </div>
+</section>
+
+<footer>
+  <p>For education only. Not financial advice. We are not licensed advisors. The simulation is an illustration built on stated assumptions; it is not a prediction of any future return.</p>
+  <p>Spotted a mistake? Tell us in the video's comments and we'll correct it here.</p>
+</footer>
+
+</main>
+<script>
+document.querySelectorAll("button[data-copy]").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var text = document.getElementById(b.getAttribute("data-copy")).textContent;
+    var done = function (msg) { b.textContent = msg; setTimeout(function () { b.textContent = "Copy code"; }, 1800); };
+    try {
+      navigator.clipboard.writeText(text).then(function () { done("Copied"); }, function () { done("Select and copy manually"); });
+    } catch (e) { done("Select and copy manually"); }
+  });
+});
+</script>
+</body>
+</html>
